@@ -60,7 +60,7 @@ function useWindowWidth(){
 
 // ─── Canvas Receipt ────────────────────────────────────────────
 async function buildReceipt({project,members,expenses,total,perPerson,balances,settlements}){
-  const sc=2,W=460,PAD=32,SG=20,RH=44;
+  const sc=2,W=380,PAD=24,SG=18,RH=42;
   const cur=project.currency||"฿";
   const dateStr=project.date?new Date(project.date+"T00:00:00").toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"}):"";
   const now=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
@@ -523,7 +523,7 @@ function PageResult({project,members,expenses,onReset,onEdit}){
     }
 
     {/* Receipt */}
-    <div style={{...card(16),padding:"16px 18px",marginBottom:10,overflow:"hidden"}}>
+    <div style={{...card(16),padding:"12px",marginBottom:10,overflow:"hidden",maxWidth:"100%"}}>
       {!receiptSrc
         ?<button onClick={genReceipt} disabled={generating}
           style={{width:"100%",padding:"14px",background:T.black,color:"#FFF",
@@ -533,7 +533,7 @@ function PageResult({project,members,expenses,onReset,onEdit}){
           {generating?"Generating…":"⬇ Download Receipt"}
         </button>
         :<div>
-          <img src={receiptSrc} alt="receipt" style={{width:"100%",maxWidth:"100%",display:"block",
+          <img src={receiptSrc} alt="receipt" style={{width:"100%",maxWidth:"100%",height:"auto",display:"block",
             borderRadius:8,marginBottom:10,boxShadow:`0 4px 20px rgba(0,0,0,0.15)`,boxSizing:"border-box"}}/>
           <div style={{display:"flex",gap:8}}>
             <button onClick={()=>{const a=document.createElement("a");a.href=receiptSrc;
