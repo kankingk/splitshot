@@ -93,12 +93,7 @@ function ReceiptCard({project,members,expenses,total,perPerson,balances,settleme
         <div style={{fontSize:11,color:"#888",marginBottom:14}}>{dateStr} · {members.length} people</div>
         {/* Divider */}
         <div style={{height:1,background:"#E5E5E5",marginBottom:12}}/>
-        {/* Breakdown header */}
-        <div style={{display:"flex",marginBottom:6}}>
-          <div style={{flex:1,fontSize:9,fontWeight:700,color:"#AAA",textTransform:"uppercase",letterSpacing:0.5}}>Name</div>
-          <div style={{width:80,textAlign:"right",fontSize:9,fontWeight:700,color:"#AAA",textTransform:"uppercase",letterSpacing:0.5}}>Paid</div>
-          <div style={{width:72,textAlign:"right",fontSize:9,fontWeight:700,color:"#AAA",textTransform:"uppercase",letterSpacing:0.5}}>Balance</div>
-        </div>
+
         {/* Members */}
         {members.map((m,i)=>{
           const exp=expenses.find(e=>e.name===m.name);
@@ -106,18 +101,18 @@ function ReceiptCard({project,members,expenses,total,perPerson,balances,settleme
           const isEven=Math.abs(bal)<0.01,isPlus=bal>0.01;
           const descs=exp?.items?.filter(it=>it.desc.trim()).map(it=>it.desc).join(", ")||"";
           return(
-            <div key={m.id} style={{borderTop:"1px solid #F0F0F0",padding:"8px 0"}}>
-              <div style={{display:"flex",alignItems:"center"}}>
-                <div style={{flex:1,display:"flex",alignItems:"center",gap:6}}>
-                  <div style={{width:18,height:18,background:MC[i%MC.length],display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:800,color:"#FFF",borderRadius:3,flexShrink:0}}>{i+1}</div>
-                  <span style={{fontWeight:700,fontSize:13,color:T.black}}>{m.name}</span>
-                </div>
-                <div style={{width:80,textAlign:"right",fontSize:12,color:"#888"}}>{cur}{fmt(paid)}</div>
-                <div style={{width:72,textAlign:"right",fontSize:12,fontWeight:800,color:isEven?"#CCC":isPlus?T.green:T.red}}>
-                  {isEven?"—":isPlus?`+${cur}${fmt(bal)}`:`-${cur}${fmt(-bal)}`}
+            <div key={m.id} style={{borderTop:"1px solid #F0F0F0",padding:"8px 0",display:"flex",alignItems:"center",gap:8}}>
+              <div style={{width:18,height:18,background:MC[i%MC.length],display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:800,color:"#FFF",borderRadius:3,flexShrink:0}}>{i+1}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontWeight:700,fontSize:13,color:T.black}}>{m.name}</div>
+                {descs&&<div style={{fontSize:10,color:"#BBB",marginTop:1}}>{descs}</div>}
+              </div>
+              <div style={{textAlign:"right",flexShrink:0}}>
+                <div style={{fontSize:11,color:"#AAA"}}>Paid {cur}{fmt(paid)}</div>
+                <div style={{fontSize:13,fontWeight:800,color:isEven?"#CCC":isPlus?T.green:T.red}}>
+                  {isEven?"Even":isPlus?`+${cur}${fmt(bal)}`:`-${cur}${fmt(-bal)}`}
                 </div>
               </div>
-              {descs&&<div style={{fontSize:10,color:"#BBB",marginTop:2,paddingLeft:24}}>{descs}</div>}
             </div>
           );
         })}
@@ -453,6 +448,21 @@ function PageExpenses({expenses,setExpenses,onBack,onNext,project}){
 function PageResult({project,members,expenses,onReset,onEdit}){
   const cur=project.currency||"฿";
   const[showReceipt,setShowReceipt]=useState(false);
+  const[saving,setSaving]=useState(false);
+  const receiptRef=useRef(null);
+  const saveReceipt=async()=>{
+    if(!receiptRef.current)return;
+    setSaving(true);
+    try{
+      const h2c=await loadHtml2Canvas();
+      const canvas=await h2c(receiptRef.current,{scale:2,useCORS:true,backgroundColor:"#FAFAF8"});
+      const fname=`${(project.projectName||"receipt").replace(/\s+/g,"-").toLowerCase()}.png`;
+      const a=document.createElement("a");a.href=canvas.toDataURL("image/png");a.download=fname;
+      document.body.appendChild(a);a.click();document.body.removeChild(a);
+      window.open(canvas.toDataURL("image/png"),"_blank");
+    }catch(e){console.error(e);}
+    setSaving(false);
+  };
   const{total,perPerson,balances,settlements}=useMemo(()=>calcSplit(expenses,members),[expenses,members]);
   const cOf=n=>{const i=members.findIndex(m=>m.name===n);return MC[i>=0?i%MC.length:0];};
   const dateStr=project.date?new Date(project.date+"T00:00:00").toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"}):"";
@@ -539,59 +549,34 @@ function PageResult({project,members,expenses,onReset,onEdit}){
     }
 
     {/* Receipt */}
-    {(()=>{
-      const receiptRef=React.useRef(null);
-      const[saving,setSaving]=useState(false);
-      const saveReceipt=async()=>{
-        if(!receiptRef.current)return;
-        setSaving(true);
-        try{
-          const h2c=await loadHtml2Canvas();
-          const canvas=await h2c(receiptRef.current,{
-            scale:2,useCORS:true,allowTaint:true,
-            backgroundColor:"#FAFAF8"
-          });
-          const fname=`${(project.projectName||"receipt").replace(/\s+/g,"-").toLowerCase()}.png`;
-          const a=document.createElement("a");
-          a.href=canvas.toDataURL("image/png");
-          a.download=fname;
-          document.body.appendChild(a);a.click();document.body.removeChild(a);
-          // fallback: open in new tab
-          window.open(canvas.toDataURL("image/png"),"_blank");
-        }catch(e){console.error(e);}
-        setSaving(false);
-      };
-      return(
-        <div style={{...card(16),padding:"12px",marginBottom:10,overflow:"hidden"}}>
-          {!showReceipt
-            ?<button onClick={()=>setShowReceipt(true)}
-              style={{width:"100%",padding:"14px",background:T.black,color:"#FFF",
-                border:`2px solid ${T.black}`,borderRadius:50,fontWeight:800,fontSize:15,
-                cursor:"pointer",fontFamily:"inherit",boxShadow:px(T.black,4)}}>
-              📄 View Receipt
+    <div style={{...card(16),padding:"12px",marginBottom:10,overflow:"hidden"}}>
+      {!showReceipt
+        ?<button onClick={()=>setShowReceipt(true)}
+          style={{width:"100%",padding:"14px",background:T.black,color:"#FFF",
+            border:`2px solid ${T.black}`,borderRadius:50,fontWeight:800,fontSize:15,
+            cursor:"pointer",fontFamily:"inherit",boxShadow:px(T.black,4)}}>
+          📄 View Receipt
+        </button>
+        :<div>
+          <div ref={receiptRef} style={{width:"100%",overflow:"hidden"}}>
+            <ReceiptCard project={project} members={members} expenses={expenses}
+              total={total} perPerson={perPerson} balances={balances} settlements={settlements}/>
+          </div>
+          <div style={{display:"flex",gap:8,marginTop:10}}>
+            <button onClick={saveReceipt} disabled={saving}
+              style={{flex:1,padding:"12px",background:T.black,color:"#FFF",
+                border:`2px solid ${T.black}`,borderRadius:50,fontWeight:800,fontSize:14,
+                cursor:saving?"wait":"pointer",fontFamily:"inherit",
+                boxShadow:saving?"none":px(T.black,3),opacity:saving?0.5:1}}>
+              {saving?"Saving...":"⬇ Save Receipt"}
             </button>
-            :<div>
-              <div ref={receiptRef}>
-                <ReceiptCard project={project} members={members} expenses={expenses}
-                  total={total} perPerson={perPerson} balances={balances} settlements={settlements}/>
-              </div>
-              <div style={{display:"flex",gap:8,marginTop:10}}>
-                <button onClick={saveReceipt} disabled={saving}
-                  style={{flex:1,padding:"12px",background:T.black,color:"#FFF",
-                    border:`2px solid ${T.black}`,borderRadius:50,fontWeight:800,fontSize:14,
-                    cursor:saving?"wait":"pointer",fontFamily:"inherit",
-                    boxShadow:saving?"none":px(T.black,3),opacity:saving?0.5:1}}>
-                  {saving?"Saving...":"⬇ Save Receipt"}
-                </button>
-                <button onClick={()=>setShowReceipt(false)}
-                  style={{padding:"12px 16px",background:T.white,border:`2px solid ${T.black}`,
-                    borderRadius:50,color:T.black,fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
-              </div>
-            </div>
-          }
+            <button onClick={()=>setShowReceipt(false)}
+              style={{padding:"12px 16px",background:T.white,border:`2px solid ${T.black}`,
+                borderRadius:50,color:T.black,fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
+          </div>
         </div>
-      );
-    })()}
+      }
+    </div>
 
     <button onClick={onReset} style={{width:"100%",background:T.white,border:`2px solid ${T.black}`,
       borderRadius:50,padding:"13px",color:T.text,fontWeight:800,fontSize:14,
