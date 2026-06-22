@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 
 // ─── Design Tokens: Neo-Editorial + Orange ─────────────────────
 const T = {
@@ -59,81 +59,99 @@ function useWindowWidth(){
 }
 
 // ─── Canvas Receipt ────────────────────────────────────────────
-async function buildReceipt({project,members,expenses,total,perPerson,balances,settlements}){
-  const sc=2,W=380,PAD=24,SG=18,RH=42;
+
+// Load html2canvas dynamically
+let html2canvasReady = null;
+function loadHtml2Canvas(){
+  if(html2canvasReady) return html2canvasReady;
+  html2canvasReady = new Promise((res,rej)=>{
+    const s=document.createElement("script");
+    s.src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
+    s.onload=()=>res(window.html2canvas);
+    s.onerror=rej;
+    document.head.appendChild(s);
+  });
+  return html2canvasReady;
+}
+
+// ─── HTML Receipt Component ───────────────────────────────────
+function ReceiptCard({project,members,expenses,total,perPerson,balances,settlements}){
   const cur=project.currency||"฿";
   const dateStr=project.date?new Date(project.date+"T00:00:00").toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"}):"";
   const now=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
-
-  // Load banner image
-  const bannerH=Math.round(W*(816/1456)); // proportional height
-  const bannerImg=await new Promise((res,rej)=>{const img=new Image();img.onload=()=>res(img);img.onerror=rej;img.src=BANNER_IMG;});
-
-  const H=bannerH+SG+28+22+20+1+SG*2+20+16+members.length*RH+8+1+SG*2+22+32+1+SG*2+18+Math.max(settlements.length,1)*RH+1+SG+30+10;
-  const cv=document.createElement("canvas"); cv.width=W*sc; cv.height=H*sc;
-  const x=cv.getContext("2d"); x.scale(sc,sc);
-  const T_=(s,ax,y,font,color,align="left")=>{x.fillStyle=color;x.font=font;x.textAlign=align;x.fillText(s,ax,y);};
-  const LINE=(y)=>{x.strokeStyle="#E5E5E5";x.lineWidth=1;x.setLineDash([]);x.beginPath();x.moveTo(PAD,y);x.lineTo(W-PAD,y);x.stroke();};
-  x.fillStyle="#FAFAF8"; x.fillRect(0,0,W,H);
-
-  // Draw banner image at top
-  x.drawImage(bannerImg,0,0,W,bannerH);
-
-  let y=bannerH+SG;
-
-  // Type badge + Project name (no more SplitShot text header - image handles branding)
-  if(project.type){
-    x.fillStyle=T.primary;x.fillRect(PAD,y-2,38,20);
-    T_(project.type,PAD+19,y+12,`800 11px -apple-system,sans-serif`,"#FFF","center");
-  }
-  const typeOffset=project.type?46:0;
-  T_(project.projectName.length>30?project.projectName.slice(0,30)+"…":project.projectName,PAD+typeOffset,y+12,`700 16px -apple-system,sans-serif`,T.black); y+=28;
-  const meta=[dateStr,project.location,`${members.length} people`].filter(Boolean).join("  ·  ");
-  T_(meta,PAD,y,`400 11px -apple-system,sans-serif`,"#888"); y+=20;
-  LINE(y); y+=SG;
-  T_("BREAKDOWN",PAD,y,`700 10px -apple-system,sans-serif`,"#AAA"); y+=16;
-  T_("NAME",PAD,y,`600 10px -apple-system,sans-serif`,"#CCC");
-  T_("PAID",W*0.62,y,`600 10px -apple-system,sans-serif`,"#CCC","right");
-  T_("BALANCE",W-PAD,y,`600 10px -apple-system,sans-serif`,"#CCC","right"); y+=8;
-  members.forEach((m,i)=>{
-    if(i>0){x.strokeStyle="#F0F0F0";x.lineWidth=1;x.beginPath();x.moveTo(PAD,y);x.lineTo(W-PAD,y);x.stroke();}
-    y+=4;
-    const exp=expenses.find(e=>e.name===m.name);
-    const paid=paidOf(exp); const bal=balances[m.name]||0;
-    const isEven=Math.abs(bal)<0.01, isPlus=bal>0.01;
-    x.fillStyle=MC[i%MC.length]; x.fillRect(PAD,y+2,20,20);
-    T_(String(i+1),PAD+10,y+15,`800 11px -apple-system,sans-serif`,"#FFF","center");
-    T_(m.name,PAD+28,y+15,`700 14px -apple-system,sans-serif`,T.black);
-    T_(`${cur}${fmt(paid)}`,W*0.62,y+15,`400 13px -apple-system,sans-serif`,"#888","right");
-    const balStr=isEven?"—":isPlus?`+${cur}${fmt(bal)}`:`-${cur}${fmt(-bal)}`;
-    T_(balStr,W-PAD,y+15,`700 13px -apple-system,sans-serif`,isEven?"#CCC":isPlus?T.green:T.red,"right");
-    const descs=exp?.items?.filter(it=>it.desc.trim()).map(it=>it.desc).join(", ")||"";
-    if(descs){T_(descs.length>38?descs.slice(0,38)+"…":descs,PAD+28,y+28,`400 10px -apple-system,sans-serif`,"#BBB");y+=RH+8;}
-    else{y+=RH;}
-  });
-  y+=4; LINE(y); y+=SG;
-  T_("Total Spent",PAD,y+2,`500 12px -apple-system,sans-serif`,"#888");
-  T_(`${cur}${fmt(total)}`,W-PAD,y+2,`700 15px -apple-system,sans-serif`,T.black,"right"); y+=22;
-  x.fillStyle=T.primary; x.fillRect(PAD-4,y-2,W-PAD*2+8,28);
-  T_("Each Person Owes",PAD+4,y+14,`700 11px -apple-system,sans-serif`,"#FFF");
-  T_(`${cur}${fmt(perPerson)}`,W-PAD-4,y+16,`900 18px -apple-system,sans-serif`,"#FFF","right"); y+=32;
-  LINE(y); y+=SG;
-  T_("SETTLEMENT",PAD,y,`700 10px -apple-system,sans-serif`,"#AAA"); y+=18;
-  if(settlements.length===0){T_("✓ All Square — Nobody owes anything",PAD,y+16,`700 14px -apple-system,sans-serif`,T.green);y+=RH;}
-  else settlements.forEach((s,idx)=>{
-    if(idx>0){x.strokeStyle="#F0F0F0";x.lineWidth=1;x.beginPath();x.moveTo(PAD,y);x.lineTo(W-PAD,y);x.stroke();}
-    y+=4;
-    T_(s.from,PAD,y+16,`700 14px -apple-system,sans-serif`,T.black);
-    T_("→",PAD+x.measureText(s.from).width+8,y+16,`400 14px -apple-system,sans-serif`,"#AAA");
-    T_(s.to,PAD+x.measureText(s.from).width+24,y+16,`700 14px -apple-system,sans-serif`,T.black);
-    T_(`${cur}${fmt(s.amount)}`,W-PAD,y+16,`900 17px -apple-system,sans-serif`,T.primary,"right");
-    y+=RH;
-  });
-  LINE(y); y+=SG;
-  T_(`SplitShot  ·  ${now}`,W/2,y+12,`400 11px -apple-system,sans-serif`,"#CCC","center");
-  x.fillStyle=T.primary; x.fillRect(0,H-6,W,6);
-  return cv;
+  return(
+    <div style={{background:"#FAFAF8",border:`2px solid ${T.black}`,borderRadius:8,overflow:"hidden",width:"100%",boxSizing:"border-box"}}>
+      {/* Banner */}
+      <img src={BANNER_IMG} alt="SplitShot" style={{width:"100%",display:"block",maxWidth:"100%"}}/>
+      {/* Body */}
+      <div style={{padding:"16px 14px"}}>
+        {/* Project */}
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+          {project.type&&<span style={{background:T.primary,color:"#FFF",fontSize:10,fontWeight:800,padding:"2px 7px",borderRadius:3}}>{project.type}</span>}
+          <span style={{fontWeight:800,fontSize:15,color:T.black}}>{project.projectName}</span>
+        </div>
+        <div style={{fontSize:11,color:"#888",marginBottom:14}}>{dateStr} · {members.length} people</div>
+        {/* Divider */}
+        <div style={{height:1,background:"#E5E5E5",marginBottom:12}}/>
+        {/* Breakdown header */}
+        <div style={{display:"flex",marginBottom:6}}>
+          <div style={{flex:1,fontSize:9,fontWeight:700,color:"#AAA",textTransform:"uppercase",letterSpacing:0.5}}>Name</div>
+          <div style={{width:80,textAlign:"right",fontSize:9,fontWeight:700,color:"#AAA",textTransform:"uppercase",letterSpacing:0.5}}>Paid</div>
+          <div style={{width:72,textAlign:"right",fontSize:9,fontWeight:700,color:"#AAA",textTransform:"uppercase",letterSpacing:0.5}}>Balance</div>
+        </div>
+        {/* Members */}
+        {members.map((m,i)=>{
+          const exp=expenses.find(e=>e.name===m.name);
+          const paid=paidOf(exp); const bal=balances[m.name]||0;
+          const isEven=Math.abs(bal)<0.01,isPlus=bal>0.01;
+          const descs=exp?.items?.filter(it=>it.desc.trim()).map(it=>it.desc).join(", ")||"";
+          return(
+            <div key={m.id} style={{borderTop:"1px solid #F0F0F0",padding:"8px 0"}}>
+              <div style={{display:"flex",alignItems:"center"}}>
+                <div style={{flex:1,display:"flex",alignItems:"center",gap:6}}>
+                  <div style={{width:18,height:18,background:MC[i%MC.length],display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:800,color:"#FFF",borderRadius:3,flexShrink:0}}>{i+1}</div>
+                  <span style={{fontWeight:700,fontSize:13,color:T.black}}>{m.name}</span>
+                </div>
+                <div style={{width:80,textAlign:"right",fontSize:12,color:"#888"}}>{cur}{fmt(paid)}</div>
+                <div style={{width:72,textAlign:"right",fontSize:12,fontWeight:800,color:isEven?"#CCC":isPlus?T.green:T.red}}>
+                  {isEven?"—":isPlus?`+${cur}${fmt(bal)}`:`-${cur}${fmt(-bal)}`}
+                </div>
+              </div>
+              {descs&&<div style={{fontSize:10,color:"#BBB",marginTop:2,paddingLeft:24}}>{descs}</div>}
+            </div>
+          );
+        })}
+        {/* Totals */}
+        <div style={{height:1,background:"#E5E5E5",margin:"12px 0"}}/>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+          <span style={{fontSize:12,color:"#888"}}>Total Spent</span>
+          <span style={{fontSize:13,fontWeight:700,color:T.black}}>{cur}{fmt(total)}</span>
+        </div>
+        <div style={{background:T.primary,padding:"8px 10px",display:"flex",justifyContent:"space-between",alignItems:"center",borderRadius:4}}>
+          <span style={{fontSize:11,fontWeight:700,color:"#FFF"}}>Each Person Owes</span>
+          <span style={{fontSize:16,fontWeight:900,color:"#FFF"}}>{cur}{fmt(perPerson)}</span>
+        </div>
+        {/* Settlement */}
+        {settlements.length>0&&<>
+          <div style={{height:1,background:"#E5E5E5",margin:"12px 0"}}/>
+          <div style={{fontSize:9,fontWeight:700,color:"#AAA",textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>Settlement</div>
+          {settlements.map((s,i)=>(
+            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderTop:i>0?"1px solid #F0F0F0":"none"}}>
+              <span style={{fontSize:13,fontWeight:700,color:T.black}}>{s.from} <span style={{color:"#AAA",fontWeight:400}}>→</span> {s.to}</span>
+              <span style={{fontSize:14,fontWeight:900,color:T.primary}}>{cur}{fmt(s.amount)}</span>
+            </div>
+          ))}
+        </>}
+        {settlements.length===0&&<div style={{textAlign:"center",padding:"10px 0",color:T.green,fontWeight:700,fontSize:13}}>🎉 All Square!</div>}
+      </div>
+      {/* Footer */}
+      <div style={{background:T.primary,padding:"8px",textAlign:"center"}}>
+        <span style={{color:"rgba(255,255,255,0.7)",fontSize:10}}>SplitShot · {now}</span>
+      </div>
+    </div>
+  );
 }
+
 
 // ─── Atoms ────────────────────────────────────────────────────
 function Avatar({index=0,color,size=40}){
@@ -434,13 +452,11 @@ function PageExpenses({expenses,setExpenses,onBack,onNext,project}){
 // ─── Page 4: Result ───────────────────────────────────────────
 function PageResult({project,members,expenses,onReset,onEdit}){
   const cur=project.currency||"฿";
-  const[receiptSrc,setReceiptSrc]=useState(null);
-  const[generating,setGenerating]=useState(false);
+  const[showReceipt,setShowReceipt]=useState(false);
   const{total,perPerson,balances,settlements}=useMemo(()=>calcSplit(expenses,members),[expenses,members]);
   const cOf=n=>{const i=members.findIndex(m=>m.name===n);return MC[i>=0?i%MC.length:0];};
   const dateStr=project.date?new Date(project.date+"T00:00:00").toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"}):"";
-  const rd={project,members,expenses,total,perPerson,balances,settlements};
-  const genReceipt=async()=>{setGenerating(true);try{const cv=await buildReceipt(rd);setReceiptSrc(cv.toDataURL("image/png"));}catch(e){console.error(e);}setGenerating(false);};
+
 
   return <div>
     {/* Hero */}
@@ -523,32 +539,59 @@ function PageResult({project,members,expenses,onReset,onEdit}){
     }
 
     {/* Receipt */}
-    <div style={{...card(16),padding:"12px",marginBottom:10,overflow:"hidden",maxWidth:"100%"}}>
-      {!receiptSrc
-        ?<button onClick={genReceipt} disabled={generating}
-          style={{width:"100%",padding:"14px",background:T.black,color:"#FFF",
-            border:`2px solid ${T.black}`,borderRadius:50,fontWeight:800,fontSize:15,
-            cursor:generating?"wait":"pointer",fontFamily:"inherit",
-            boxShadow:generating?"none":px(T.black,4),opacity:generating?0.5:1}}>
-          {generating?"Generating…":"⬇ Download Receipt"}
-        </button>
-        :<div>
-          <img src={receiptSrc} alt="receipt" style={{width:"100%",maxWidth:"100%",height:"auto",display:"block",
-            borderRadius:8,marginBottom:10,boxShadow:`0 4px 20px rgba(0,0,0,0.15)`,boxSizing:"border-box"}}/>
-          <div style={{display:"flex",gap:8}}>
-            <button onClick={()=>{const a=document.createElement("a");a.href=receiptSrc;
-              a.download=`${(project.projectName||"receipt").replace(/\s+/g,"-").toLowerCase()}.png`;
-              document.body.appendChild(a);a.click();document.body.removeChild(a);}}
-              style={{flex:1,padding:"12px",background:T.black,color:"#FFF",
-                border:`2px solid ${T.black}`,borderRadius:50,fontWeight:800,fontSize:14,
-                cursor:"pointer",fontFamily:"inherit",boxShadow:px(T.black,3)}}>⬇ Save Image</button>
-            <button onClick={()=>setReceiptSrc(null)}
-              style={{padding:"12px 16px",background:T.white,border:`2px solid ${T.black}`,
-                borderRadius:50,color:T.black,fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
-          </div>
+    {(()=>{
+      const receiptRef=React.useRef(null);
+      const[saving,setSaving]=useState(false);
+      const saveReceipt=async()=>{
+        if(!receiptRef.current)return;
+        setSaving(true);
+        try{
+          const h2c=await loadHtml2Canvas();
+          const canvas=await h2c(receiptRef.current,{
+            scale:2,useCORS:true,allowTaint:true,
+            backgroundColor:"#FAFAF8"
+          });
+          const fname=`${(project.projectName||"receipt").replace(/\s+/g,"-").toLowerCase()}.png`;
+          const a=document.createElement("a");
+          a.href=canvas.toDataURL("image/png");
+          a.download=fname;
+          document.body.appendChild(a);a.click();document.body.removeChild(a);
+          // fallback: open in new tab
+          window.open(canvas.toDataURL("image/png"),"_blank");
+        }catch(e){console.error(e);}
+        setSaving(false);
+      };
+      return(
+        <div style={{...card(16),padding:"12px",marginBottom:10,overflow:"hidden"}}>
+          {!showReceipt
+            ?<button onClick={()=>setShowReceipt(true)}
+              style={{width:"100%",padding:"14px",background:T.black,color:"#FFF",
+                border:`2px solid ${T.black}`,borderRadius:50,fontWeight:800,fontSize:15,
+                cursor:"pointer",fontFamily:"inherit",boxShadow:px(T.black,4)}}>
+              📄 View Receipt
+            </button>
+            :<div>
+              <div ref={receiptRef}>
+                <ReceiptCard project={project} members={members} expenses={expenses}
+                  total={total} perPerson={perPerson} balances={balances} settlements={settlements}/>
+              </div>
+              <div style={{display:"flex",gap:8,marginTop:10}}>
+                <button onClick={saveReceipt} disabled={saving}
+                  style={{flex:1,padding:"12px",background:T.black,color:"#FFF",
+                    border:`2px solid ${T.black}`,borderRadius:50,fontWeight:800,fontSize:14,
+                    cursor:saving?"wait":"pointer",fontFamily:"inherit",
+                    boxShadow:saving?"none":px(T.black,3),opacity:saving?0.5:1}}>
+                  {saving?"Saving...":"⬇ Save Receipt"}
+                </button>
+                <button onClick={()=>setShowReceipt(false)}
+                  style={{padding:"12px 16px",background:T.white,border:`2px solid ${T.black}`,
+                    borderRadius:50,color:T.black,fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
+              </div>
+            </div>
+          }
         </div>
-      }
-    </div>
+      );
+    })()}
 
     <button onClick={onReset} style={{width:"100%",background:T.white,border:`2px solid ${T.black}`,
       borderRadius:50,padding:"13px",color:T.text,fontWeight:800,fontSize:14,
